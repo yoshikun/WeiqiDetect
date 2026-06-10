@@ -1,14 +1,30 @@
 import base64
 
-import cv2
-import numpy as np
 import requests
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
 
+def health_payload():
+    return {"ok": True, "service": "weiqi-detect", "version": "1.1.0"}
+
+
+@app.route("/", methods=["GET", "POST"])
+def root():
+    return jsonify(health_payload())
+
+
+@app.route("/health", methods=["GET", "POST"])
+@app.route("/health/", methods=["GET", "POST"])
+def health():
+    return jsonify(health_payload())
+
+
 def detect_board(img, board_size=19):
+    import cv2
+    import numpy as np
+
     height, width = img.shape[:2]
     margin = 0.08
     x0 = int(width * margin)
@@ -50,6 +66,9 @@ def detect_board(img, board_size=19):
 
 
 def decode_image(payload):
+    import cv2
+    import numpy as np
+
     image_url = payload.get("imageUrl")
     if image_url:
         try:
@@ -72,12 +91,7 @@ def decode_image(payload):
         return None
 
 
-@app.get("/health")
-def health():
-    return jsonify({"ok": True, "service": "weiqi-detect"})
-
-
-@app.post("/api/v1/detect")
+@app.route("/api/v1/detect", methods=["POST"])
 def detect():
     payload = request.get_json(silent=True) or {}
     board_size = int(payload.get("boardSize") or 19)
@@ -92,7 +106,11 @@ def detect():
     if img is None:
         return jsonify({"ok": False, "error": "invalid image"}), 400
 
-    result = detect_board(img, board_size)
+    try:
+        result = detect_board(img, board_size)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f"detect failed: {exc}"}), 500
+
     return jsonify(result)
 
 
