@@ -1,0 +1,10 @@
+{
+  "patchSize": 64,
+  "classes": [
+    "empty",
+    "black",
+    "white"
+  ],
+  "valAccuracy": 1.0,
+  "epochs": 12
+}
