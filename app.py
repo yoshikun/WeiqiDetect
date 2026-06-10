@@ -1,10 +1,11 @@
 from flask import Flask, jsonify, request
 
-from detector import detect_board
+from baduk_detect import detect_board_baduk, suggest_corners
 from image_decode import decode_image
+from moku_detect import is_ready as moku_ready
 
 app = Flask(__name__)
-VERSION = "3.0.0"
+VERSION = "5.0.0"
 
 
 def health_payload():
@@ -12,7 +13,8 @@ def health_payload():
         "ok": True,
         "service": "weiqi-detect",
         "version": VERSION,
-        "detector": "circles",
+        "detector": "baduk",
+        "mokuReady": moku_ready(),
     }
 
 
@@ -25,6 +27,22 @@ def root():
 @app.route("/health/", methods=["GET", "POST"])
 def health():
     return jsonify(health_payload())
+
+
+@app.route("/api/v1/corners", methods=["POST"])
+def corners():
+    payload = request.get_json(silent=True) or {}
+    if not payload.get("imageUrl") and not payload.get("image"):
+        return jsonify({"ok": False, "error": "missing image"}), 400
+
+    img = decode_image(payload)
+    if img is None:
+        return jsonify({"ok": False, "error": "invalid image"}), 400
+
+    try:
+        return jsonify(suggest_corners(img))
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f"corners failed: {exc}"}), 500
 
 
 @app.route("/api/v1/detect", methods=["POST"])
@@ -42,8 +60,16 @@ def detect():
     if img is None:
         return jsonify({"ok": False, "error": "invalid image"}), 400
 
+    corners = payload.get("corners")
+    with_preview = bool(payload.get("withPreview"))
+
     try:
-        result = detect_board(img, board_size)
+        result = detect_board_baduk(
+            img,
+            board_size,
+            corners=corners,
+            with_preview=with_preview,
+        )
     except Exception as exc:
         return jsonify({"ok": False, "error": f"detect failed: {exc}"}), 500
 

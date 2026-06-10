@@ -1,6 +1,3 @@
+models/moku/model.onnx
 __pycache__/
-*.py[cod]
-.env
-.venv/
-venv/
-*.log
+*.pyc
