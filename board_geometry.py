@@ -335,9 +335,9 @@ def _grid_positions_from_hough(gray, board_size):
             continue
         angle = abs(np.degrees(np.arctan2(dy, dx)))
         if angle <= 20 or angle >= 160:
-            ys.append((y1 + y2) * 0.5, length))
+            ys.append(((y1 + y2) * 0.5, length))
         elif 70 <= angle <= 110:
-            xs.append((x1 + x2) * 0.5, length))
+            xs.append(((x1 + x2) * 0.5, length))
 
     if len(xs) < board_size or len(ys) < board_size:
         return None, None
