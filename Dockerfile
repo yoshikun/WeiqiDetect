@@ -9,8 +9,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py board_geometry.py cnn_classifier.py detector.py stone_fusion.py ./
-COPY models/ ./models/
+COPY app.py board_geometry.py circle_detect.py detector.py image_decode.py stone_fusion.py ./
 
 ENV PORT=80
 EXPOSE 80
