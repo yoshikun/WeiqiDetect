@@ -1,0 +1,45 @@
+name: Train CNN model
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'training/**'
+      - '.github/workflows/train-cnn-model.yml'
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install training deps
+        run: |
+          pip install --upgrade pip
+          pip install -r training/requirements-train.txt --extra-index-url https://download.pytorch.org/whl/cpu
+
+      - name: Train and export ONNX
+        run: |
+          python training/train.py \
+            --output models/stone_cls.onnx \
+            --meta models/stone_cls.meta.json \
+            --epochs 12 \
+            --samples-per-class 3500
+
+      - name: Commit model artifacts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add models/stone_cls.onnx models/stone_cls.meta.json
+          if git diff --staged --quiet; then
+            echo "No model changes"
+            exit 0
+          fi
+          git commit -m "chore: update CNN model artifacts"
+          git push

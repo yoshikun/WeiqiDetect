@@ -70,9 +70,6 @@ def detect():
     if not payload.get("imageUrl") and not payload.get("image"):
         return jsonify({"ok": False, "error": "missing image"}), 400
 
-    if not is_ready():
-        return jsonify({"ok": False, "error": "CNN model not loaded"}), 503
-
     img = decode_image(payload)
     if img is None:
         return jsonify({"ok": False, "error": "invalid image"}), 400
