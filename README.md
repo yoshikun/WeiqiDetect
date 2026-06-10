@@ -1,4 +1,4 @@
-# weiqi-detect
+# WeiqiDetect
 
 围棋棋盘拍照识别服务（Flask + OpenCV），部署于**微信云托管**，供小程序 `wx.cloud.callContainer` 调用。
 
