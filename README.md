@@ -63,6 +63,8 @@ pip install -r requirements.txt
 python app.py
 ```
 
-## 说明
+## 仓库
+
+GitHub: `git@github.com:yoshikun/WeiqiDetect.git`
 
 当前为 OpenCV 基础采样版（正拍、棋盘居中效果较好）。后续可增强透视校正、网格检测与置信度输出。
