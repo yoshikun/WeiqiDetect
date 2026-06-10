@@ -7,7 +7,7 @@ from cnn_classifier import is_ready, model_info
 from detector import detect_board
 
 app = Flask(__name__)
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 
 def health_payload():
