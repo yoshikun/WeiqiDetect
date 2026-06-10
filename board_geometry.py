@@ -286,6 +286,8 @@ def _grid_positions_from_projection(gray, board_size, axis):
 
 
 def _cluster_weighted_lines(items, count, length):
+    import numpy as np
+
     if len(items) < count:
         return None
     items = sorted(items, key=lambda item: item[0])
