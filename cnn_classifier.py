@@ -59,7 +59,7 @@ def preprocess_patch(patch_bgr):
     return tensor
 
 
-def predict_patches(patches_bgr, threshold=0.52):
+def predict_patches(patches_bgr, threshold=0.58, margin=0.14):
     if not patches_bgr:
         return []
 
@@ -72,14 +72,27 @@ def predict_patches(patches_bgr, threshold=0.52):
 
     results = []
     for prob in probs:
-        label = int(prob.argmax())
-        confidence = float(prob[label])
-        if label == CLASS_BLACK and confidence >= threshold:
-            results.append(("black", confidence))
-        elif label == CLASS_WHITE and confidence >= threshold:
-            results.append(("white", confidence))
-        else:
-            results.append((None, confidence if label == CLASS_EMPTY else confidence * 0.8))
+        empty_p = float(prob[CLASS_EMPTY])
+        black_p = float(prob[CLASS_BLACK])
+        white_p = float(prob[CLASS_WHITE])
+        ordered = sorted(
+            [(CLASS_BLACK, black_p, "black"), (CLASS_WHITE, white_p, "white"), (CLASS_EMPTY, empty_p, None)],
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        best_label, best_p, best_name = ordered[0]
+        second_p = ordered[1][1]
+
+        if best_name is None:
+            results.append((None, empty_p, prob))
+            continue
+
+        if best_p < threshold or (best_p - second_p) < margin:
+            results.append((None, best_p, prob))
+            continue
+
+        results.append((best_name, best_p, prob))
+
     return results
 
 

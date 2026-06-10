@@ -50,33 +50,58 @@ def _draw_stone(img, label, cell):
 
 
 def _augment(img):
+    import cv2
+    import numpy as np
+
+    if random.random() < 0.65:
+        h, w = img.shape[:2]
+        src = np.float32([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]])
+        jitter = random.randint(4, 12)
+        dst = np.float32(
+            [
+                [random.randint(0, jitter), random.randint(0, jitter)],
+                [w - 1 - random.randint(0, jitter), random.randint(0, jitter)],
+                [w - 1 - random.randint(0, jitter), h - 1 - random.randint(0, jitter)],
+                [random.randint(0, jitter), h - 1 - random.randint(0, jitter)],
+            ]
+        )
+        matrix = cv2.getPerspectiveTransform(src, dst)
+        img = cv2.warpPerspective(img, matrix, (w, h), borderMode=cv2.BORDER_REFLECT_101)
+
+    if random.random() < 0.45:
+        offset_x = random.randint(-6, 6)
+        offset_y = random.randint(-6, 6)
+        matrix = np.float32([[1, 0, offset_x], [0, 1, offset_y]])
+        img = cv2.warpAffine(img, matrix, (img.shape[1], img.shape[0]), borderMode=cv2.BORDER_REFLECT_101)
+
     if random.random() < 0.5:
         img = cv2.flip(img, 1)
     if random.random() < 0.2:
         img = cv2.flip(img, 0)
 
-    alpha = random.uniform(0.85, 1.15)
-    beta = random.randint(-18, 18)
+    alpha = random.uniform(0.8, 1.2)
+    beta = random.randint(-22, 22)
     img = cv2.convertScaleAbs(img, alpha=alpha, beta=beta)
 
-    if random.random() < 0.35:
-        noise = np.random.normal(0, random.uniform(2, 8), img.shape).astype(np.float32)
+    if random.random() < 0.4:
+        noise = np.random.normal(0, random.uniform(2, 10), img.shape).astype(np.float32)
         img = np.clip(img.astype(np.float32) + noise, 0, 255).astype(np.uint8)
 
-    if random.random() < 0.25:
+    if random.random() < 0.3:
         k = random.choice([3, 5])
-        img = cv2.GaussianBlur(img, (k, k), random.uniform(0.2, 1.0))
+        img = cv2.GaussianBlur(img, (k, k), random.uniform(0.2, 1.2))
 
-    if random.random() < 0.2:
-        quality = random.randint(35, 85)
+    if random.random() < 0.25:
+        quality = random.randint(30, 85)
         ok, encoded = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
         if ok:
             img = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
 
-    if random.random() < 0.15:
+    if random.random() < 0.2:
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.float32)
-        hsv[:, :, 0] = (hsv[:, :, 0] + random.uniform(-6, 6)) % 180
-        hsv[:, :, 1] *= random.uniform(0.85, 1.15)
+        hsv[:, :, 0] = (hsv[:, :, 0] + random.uniform(-8, 8)) % 180
+        hsv[:, :, 1] *= random.uniform(0.8, 1.2)
+        hsv[:, :, 2] *= random.uniform(0.85, 1.15)
         img = cv2.cvtColor(np.clip(hsv, 0, 255).astype(np.uint8), cv2.COLOR_HSV2BGR)
 
     return img

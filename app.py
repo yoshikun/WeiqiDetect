@@ -7,7 +7,7 @@ from cnn_classifier import is_ready, model_info
 from detector import detect_board
 
 app = Flask(__name__)
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 
 
 def health_payload():
@@ -62,7 +62,7 @@ def decode_image(payload):
 def detect():
     payload = request.get_json(silent=True) or {}
     board_size = int(payload.get("boardSize") or 19)
-    threshold = float(payload.get("threshold") or 0.52)
+    threshold = float(payload.get("threshold") or 0.58)
 
     if board_size not in (9, 13, 19):
         return jsonify({"ok": False, "error": "unsupported boardSize"}), 400

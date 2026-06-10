@@ -70,7 +70,6 @@ def _quad_from_mask(mask, scale_factor):
 
 def _build_board_mask(small):
     import cv2
-    import numpy as np
 
     hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
     wood1 = cv2.inRange(hsv, (8, 20, 50), (35, 200, 255))
@@ -88,8 +87,6 @@ def _build_board_mask(small):
 
 
 def _quad_from_edges(small, scale_factor):
-    import cv2
-
     mask = _build_board_mask(small)
     return _quad_from_mask(mask, scale_factor)
 
@@ -139,31 +136,57 @@ def _fallback_quad(width, height):
     )
 
 
-def find_board_quad(img):
+def _scale_quad(quad, factor):
+    import numpy as np
+
+    center = quad.mean(axis=0)
+    return order_points((center + (quad - center) * factor).astype(np.float32))
+
+
+def find_board_quad_candidates(img):
     import cv2
+    import numpy as np
 
     height, width = img.shape[:2]
-    scale = min(1.0, 1000.0 / max(height, width))
+    scale = min(1.0, 1200.0 / max(height, width))
     small = cv2.resize(img, (int(width * scale), int(height * scale))) if scale < 1 else img
     scale_factor = width / small.shape[1] if scale < 1 else 1.0
 
     candidates = []
+    seen = []
+
+    def add_quad(quad):
+        if quad is None:
+            return
+        score = _score_quad(quad, width, height)
+        if score <= 0:
+            return
+        key = tuple(np.round(quad.reshape(-1), 1))
+        if key in seen:
+            return
+        seen.append(key)
+        candidates.append((score, quad))
+
     for finder in (_quad_from_largest_edge_contour, _quad_from_edges):
         quad = finder(small, scale_factor)
-        if quad is None:
-            continue
-        score = _score_quad(quad, width, height)
-        if score > 0:
-            candidates.append((score, quad))
+        add_quad(quad)
+        if quad is not None:
+            for factor in (0.94, 0.97, 1.03, 1.06):
+                add_quad(_scale_quad(quad, factor))
 
-    if candidates:
-        candidates.sort(key=lambda item: item[0], reverse=True)
-        return candidates[0][1]
+    if not candidates:
+        add_quad(_fallback_quad(width, height))
 
-    return _fallback_quad(width, height)
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return [quad for _, quad in candidates[:6]]
 
 
-def warp_board(img, quad, size=960):
+def find_board_quad(img):
+    candidates = find_board_quad_candidates(img)
+    return candidates[0]
+
+
+def warp_board(img, quad, size=1024):
     import cv2
     import numpy as np
 
@@ -185,54 +208,71 @@ def _smooth_1d(values, window=9):
     return np.convolve(values, kernel, mode="same")
 
 
-def _pick_peaks(profile, count):
+def _local_maxima(profile):
     import numpy as np
 
-    smoothed = _smooth_1d(profile.astype(np.float32), max(5, len(profile) // 80 | 1))
+    smoothed = _smooth_1d(profile.astype(np.float32), max(5, len(profile) // 60 | 1))
     if smoothed.max() <= 0:
-        return None
+        return []
 
-    candidates = []
+    peaks = []
     for idx in range(1, len(smoothed) - 1):
         if smoothed[idx] >= smoothed[idx - 1] and smoothed[idx] >= smoothed[idx + 1]:
-            candidates.append((float(smoothed[idx]), idx))
+            peaks.append((float(smoothed[idx]), idx))
+    return peaks
 
-    if len(candidates) < count:
+
+def _fit_uniform_grid(peaks, count, length):
+    import numpy as np
+
+    if len(peaks) < count:
         return None
 
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    strong = candidates[: max(count * 3, count + 4)]
-    strong.sort(key=lambda item: item[1])
-    if len(strong) < count:
-        return None
+    peaks = sorted(peaks, key=lambda item: item[1])
+    positions = np.array([item[1] for item in peaks], dtype=np.float32)
+    strengths = np.array([item[0] for item in peaks], dtype=np.float32)
 
-    positions = np.array([item[1] for item in strong], dtype=np.float32)
-    if len(positions) == count:
-        return positions
+    best = None
+    best_score = -1.0
+    for start_idx in range(len(positions) - count + 1):
+        subset = positions[start_idx : start_idx + count]
+        span = subset[-1] - subset[0]
+        if span < length * 0.45:
+            continue
+        gaps = np.diff(subset)
+        if gaps.min() <= 0:
+            continue
+        mean_gap = span / max(count - 1, 1)
+        regularity = 1.0 / (1.0 + float(np.std(gaps)) / max(mean_gap, 1.0))
+        strength = float(strengths[start_idx : start_idx + count].mean())
+        score = regularity * 0.7 + min(1.0, strength / max(strengths.max(), 1.0)) * 0.3
+        if score > best_score:
+            best_score = score
+            best = subset
 
-    step = (len(profile) - 1) / max(count - 1, 1)
-    target = np.array([step * i for i in range(count)], dtype=np.float32)
-    chosen = []
-    used = set()
-    for target_pos in target:
-        best_idx = None
-        best_dist = 1e9
-        for pos in positions:
-            pos_int = int(pos)
-            if pos_int in used:
-                continue
-            dist = abs(pos - target_pos)
-            if dist < best_dist:
-                best_dist = dist
-                best_idx = pos_int
-        if best_idx is None:
-            return None
-        used.add(best_idx)
-        chosen.append(best_idx)
+    return best
 
-    if len(chosen) != count:
-        return None
-    return np.array(chosen, dtype=np.float32)
+
+def _grid_from_morphology(gray, board_size):
+    import cv2
+    import numpy as np
+
+    height, width = gray.shape[:2]
+    binary = cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 4
+    )
+    h_len = max(9, width // max(board_size - 1, 1))
+    v_len = max(9, height // max(board_size - 1, 1))
+    h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (h_len, 1))
+    v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, v_len))
+    horizontal = cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel)
+    vertical = cv2.morphologyEx(binary, cv2.MORPH_OPEN, v_kernel)
+
+    xs = _fit_uniform_grid(_local_maxima(vertical.sum(axis=0)), board_size, width)
+    ys = _fit_uniform_grid(_local_maxima(horizontal.sum(axis=1)), board_size, height)
+    if xs is not None and ys is not None:
+        return xs, ys, "morph"
+    return None, None, "morph"
 
 
 def _grid_positions_from_projection(gray, board_size, axis):
@@ -240,7 +280,31 @@ def _grid_positions_from_projection(gray, board_size, axis):
 
     inverted = 255 - gray
     profile = inverted.sum(axis=axis).astype(np.float32)
-    return _pick_peaks(profile, board_size)
+    peaks = _local_maxima(profile)
+    positions = _fit_uniform_grid(peaks, board_size, len(profile))
+    return positions
+
+
+def _cluster_weighted_lines(items, count, length):
+    if len(items) < count:
+        return None
+    items = sorted(items, key=lambda item: item[0])
+    positions = [item[0] for item in items]
+    weights = [item[1] for item in items]
+    peaks = []
+    current = [positions[0]]
+    current_w = [weights[0]]
+    gap = max(8.0, (positions[-1] - positions[0]) / (count * 1.2))
+    for pos, weight in zip(positions[1:], weights[1:]):
+        if pos - current[-1] <= gap:
+            current.append(pos)
+            current_w.append(weight)
+        else:
+            peaks.append((float(np.average(current, weights=current_w)), int(np.mean(current))))
+            current = [pos]
+            current_w = [weight]
+    peaks.append((float(np.average(current, weights=current_w)), int(np.mean(current))))
+    return _fit_uniform_grid(peaks, count, length)
 
 
 def _grid_positions_from_hough(gray, board_size):
@@ -253,9 +317,9 @@ def _grid_positions_from_hough(gray, board_size):
         edges,
         1,
         np.pi / 180,
-        threshold=max(40, min_len // 2),
+        threshold=max(35, min_len // 2),
         minLineLength=min_len,
-        maxLineGap=12,
+        maxLineGap=14,
     )
     if lines is None:
         return None, None
@@ -267,57 +331,67 @@ def _grid_positions_from_hough(gray, board_size):
         dx = x2 - x1
         dy = y2 - y1
         length = float(np.hypot(dx, dy))
-        if length < min_len * 0.6:
+        if length < min_len * 0.55:
             continue
         angle = abs(np.degrees(np.arctan2(dy, dx)))
         if angle <= 20 or angle >= 160:
-            ys.append((y1 + y2) * 0.5)
+            ys.append((y1 + y2) * 0.5, length))
         elif 70 <= angle <= 110:
-            xs.append((x1 + x2) * 0.5)
+            xs.append((x1 + x2) * 0.5, length))
 
     if len(xs) < board_size or len(ys) < board_size:
         return None, None
 
-    def cluster(values, count):
-        values = np.array(sorted(values), dtype=np.float32)
-        if len(values) < count:
-            return None
-        groups = []
-        current = [values[0]]
-        gap = max(8.0, (values[-1] - values[0]) / (count * 1.5))
-        for value in values[1:]:
-            if value - current[-1] <= gap:
-                current.append(value)
-            else:
-                groups.append(float(np.mean(current)))
-                current = [value]
-        groups.append(float(np.mean(current)))
-        if len(groups) < count:
-            return None
-        groups = np.array(groups, dtype=np.float32)
-        if len(groups) == count:
-            return groups
-        step = (len(groups) - 1) / max(count - 1, 1)
-        indices = np.round(np.arange(count) * step).astype(int)
-        return groups[indices]
-
-    return cluster(xs, board_size), cluster(ys, board_size)
+    return _cluster_weighted_lines(xs, board_size, gray.shape[1]), _cluster_weighted_lines(
+        ys, board_size, gray.shape[0]
+    )
 
 
 def detect_grid_positions(gray, board_size):
-    xs, ys = _grid_positions_from_hough(gray, board_size)
-    if xs is not None and ys is not None:
-        return xs, ys, "hough"
+    import numpy as np
+
+    methods = (
+        _grid_from_morphology,
+        _grid_positions_from_hough,
+    )
+    for method in methods:
+        if method is _grid_from_morphology:
+            xs, ys, name = method(gray, board_size)
+        else:
+            xs, ys = method(gray, board_size)
+            name = "hough"
+        if xs is not None and ys is not None and len(xs) == board_size and len(ys) == board_size:
+            return xs.astype(np.float32), ys.astype(np.float32), name
 
     xs = _grid_positions_from_projection(gray, board_size, axis=0)
     ys = _grid_positions_from_projection(gray, board_size, axis=1)
     if xs is not None and ys is not None:
-        return xs, ys, "projection"
+        return xs.astype(np.float32), ys.astype(np.float32), "projection"
 
     height, width = gray.shape[:2]
     xs = np.array([(i + 0.5) * width / board_size for i in range(board_size)], dtype=np.float32)
     ys = np.array([(i + 0.5) * height / board_size for i in range(board_size)], dtype=np.float32)
     return xs, ys, "uniform"
+
+
+def score_grid_alignment(gray, board_size):
+    import numpy as np
+
+    xs, ys, method = detect_grid_positions(gray, board_size)
+    if method == "uniform":
+        return 0.0, method
+
+    gap_x = np.diff(xs)
+    gap_y = np.diff(ys)
+    if gap_x.size == 0 or gap_y.size == 0:
+        return 0.0, method
+
+    mean_x = float(gap_x.mean())
+    mean_y = float(gap_y.mean())
+    reg_x = 1.0 / (1.0 + float(np.std(gap_x)) / max(mean_x, 1.0))
+    reg_y = 1.0 / (1.0 + float(np.std(gap_y)) / max(mean_y, 1.0))
+    method_bonus = {"morph": 0.12, "hough": 0.08, "projection": 0.04, "uniform": 0.0}
+    return (reg_x + reg_y) * 0.5 + method_bonus.get(method, 0.0), method
 
 
 def intersection_points(board_size, width, height, xs=None, ys=None):
