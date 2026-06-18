@@ -9,7 +9,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py detector.py image_decode.py moku_detect.py baduk_detect.py kaya_corners.py kaya_stones.py board_geometry.py ./
+COPY app.py image_decode.py moku_detect.py baduk_detect.py kaya_corners.py kaya_stones.py board_geometry.py opencv_series_detect.py ./
 
 RUN mkdir -p models/moku \
   && curl -fsSL -o models/moku/model.onnx \

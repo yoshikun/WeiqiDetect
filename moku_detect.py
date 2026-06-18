@@ -217,6 +217,7 @@ def _map_stones_to_grid(stones, corners, board_size):
     white = []
     confidences = []
     occupied = set()
+    min_dist = 0.38 / max(board_size - 1, 1)
 
     sorted_stones = sorted(stones, key=lambda item: item["score"], reverse=True)
     for det in sorted_stones:
@@ -226,6 +227,14 @@ def _map_stones_to_grid(stones, corners, board_size):
         row = int(np.clip(round(float(mapped[1]) * (board_size - 1)), 0, board_size - 1))
         key = (col, row)
         if key in occupied:
+            continue
+        too_close = False
+        for occ_col, occ_row in occupied:
+            if abs(occ_col - col) + abs(occ_row - row) <= 1:
+                if np.hypot(col - occ_col, row - occ_row) < min_dist * (board_size - 1):
+                    too_close = True
+                    break
+        if too_close:
             continue
         occupied.add(key)
         confidences.append(det["score"])
@@ -272,7 +281,9 @@ def detect_board_moku(img_bgr, board_size=19, threshold=DEFAULT_THRESHOLD):
         corners = _inset_image_corners(width, height, 0.05)
         corners_detected = False
 
-    corners, _collapsed = _spread_collapsed_corners(corners, width, height)
+    corners, collapsed = _spread_collapsed_corners(corners, width, height)
+    if collapsed:
+        corners_detected = False
 
     black, white, confidences = _map_stones_to_grid(stones, corners, board_size)
     avg_conf = round(sum(confidences) / len(confidences), 3) if confidences else 0.0
@@ -284,13 +295,51 @@ def detect_board_moku(img_bgr, board_size=19, threshold=DEFAULT_THRESHOLD):
         "white": white,
         "confidence": avg_conf,
         "detector": "moku",
+        "corners": corners.reshape(-1).tolist(),
+        "cornersDetected": corners_detected,
         "stats": {
             "blackCount": len(black),
             "whiteCount": len(white),
             "cornerCount": min(len(corner_candidates), 4),
             "cornersDetected": corners_detected,
+            "cornerSource": "moku",
+            "stoneSource": "rtdetr",
             "rawStoneCount": len(stones),
             "threshold": threshold,
             "model": "moku-v3",
+        },
+    }
+
+
+def detect_stones_on_warped(warped_bgr, board_size=19, threshold=DEFAULT_THRESHOLD):
+    """Run RT-DETR stone detection on an already warped square board image."""
+    session = _get_session()
+    tensor, width, height = _preprocess(warped_bgr)
+
+    outputs = session.run(None, {"pixel_values": tensor})
+    output_names = [item.name for item in session.get_outputs()]
+    output_map = dict(zip(output_names, outputs))
+
+    logits = output_map.get("logits", outputs[0]).reshape(-1)
+    pred_boxes = output_map.get("pred_boxes", outputs[1]).reshape(-1)
+
+    stones, _corner_candidates = _decode_detections(logits, pred_boxes, width, height, threshold)
+    corners = _inset_image_corners(width, height, 0.03)
+    black, white, confidences = _map_stones_to_grid(stones, corners, board_size)
+    avg_conf = round(sum(confidences) / len(confidences), 3) if confidences else 0.0
+
+    return {
+        "ok": True,
+        "boardSize": board_size,
+        "black": black,
+        "white": white,
+        "confidence": avg_conf,
+        "detector": "moku-warp",
+        "stats": {
+            "blackCount": len(black),
+            "whiteCount": len(white),
+            "stoneSource": "rtdetr-warp",
+            "rawStoneCount": len(stones),
+            "threshold": threshold,
         },
     }

@@ -75,6 +75,14 @@ def _grid_point(col, row, board_size, grid_corners, cell_size):
     return col * cell_size, row * cell_size
 
 
+def _stone_radius_ratio(board_size):
+    if board_size <= 9:
+        return 0.40
+    if board_size <= 13:
+        return 0.36
+    return 0.32
+
+
 def classify_intersections(gray, board_size, grid_corners=None):
     height, width = gray.shape[:2]
     if grid_corners is not None:
@@ -85,8 +93,9 @@ def classify_intersections(gray, board_size, grid_corners=None):
     else:
         cell_size = (width - 1) / max(board_size - 1, 1)
 
-    disc_radius = cell_size * 0.35
-    var_radius = cell_size * 0.35
+    radius_ratio = _stone_radius_ratio(board_size)
+    disc_radius = cell_size * radius_ratio
+    var_radius = cell_size * radius_ratio
     total = board_size * board_size
     brightness = np.zeros(total, dtype=np.float32)
     variances = np.zeros(total, dtype=np.float32)
@@ -118,8 +127,8 @@ def classify_intersections(gray, board_size, grid_corners=None):
     black_boundary = (black_c + board_c) / 2
     white_boundary = (board_c + white_c) / 2
     total_spread = white_c - black_c
-    has_black = total_spread > 5 and board_c - black_c > total_spread * 0.15
-    has_white = total_spread > 5 and white_c - board_c > total_spread * 0.15
+    has_black = total_spread > 4 and board_c - black_c > total_spread * 0.12
+    has_white = total_spread > 4 and white_c - board_c > total_spread * 0.12
     median_var = float(np.median(variances))
 
     black = []
@@ -129,9 +138,9 @@ def classify_intersections(gray, board_size, grid_corners=None):
         for col in range(board_size):
             idx = row * board_size + col
             rel = relative[idx]
-            high_var = variances[idx] > median_var * 3
+            high_var = variances[idx] > median_var * 2.0
             is_edge = row in (0, board_size - 1) or col in (0, board_size - 1)
-            margin = total_spread * 0.1 if is_edge else 0.0
+            margin = total_spread * 0.08 if is_edge else 0.0
             if has_black and rel < black_boundary - margin and (not high_var or rel < black_c * 0.5):
                 black.append([col, row])
                 confidences.append(min(1.0, abs(rel - black_boundary) / max(total_spread, 1.0) + 0.4))

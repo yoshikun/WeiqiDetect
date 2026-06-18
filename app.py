@@ -1,11 +1,12 @@
 from flask import Flask, jsonify, request
 
-from baduk_detect import detect_board_baduk, suggest_corners
+from baduk_detect import detect_board_kaya, suggest_corners
 from image_decode import decode_image
 from moku_detect import is_ready as moku_ready
+from opencv_series_detect import detect_board_opencv_series
 
 app = Flask(__name__)
-VERSION = "5.0.0"
+VERSION = "6.1.0"
 
 
 def health_payload():
@@ -13,7 +14,8 @@ def health_payload():
         "ok": True,
         "service": "weiqi-detect",
         "version": VERSION,
-        "detector": "baduk",
+        "detector": "kaya",
+        "pipeline": "moku-rtdetr+cv",
         "mokuReady": moku_ready(),
     }
 
@@ -62,14 +64,25 @@ def detect():
 
     corners = payload.get("corners")
     with_preview = bool(payload.get("withPreview"))
+    threshold = float(payload.get("threshold") or 0.035)
+    pipeline = (payload.get("pipeline") or "kaya").strip().lower()
 
     try:
-        result = detect_board_baduk(
-            img,
-            board_size,
-            corners=corners,
-            with_preview=with_preview,
-        )
+        if pipeline in ("opencv-series", "opencv", "opencv_series"):
+            result = detect_board_opencv_series(
+                img,
+                board_size,
+                corners=corners,
+                with_preview=with_preview,
+            )
+        else:
+            result = detect_board_kaya(
+                img,
+                board_size,
+                corners=corners,
+                with_preview=with_preview,
+                threshold=threshold,
+            )
     except Exception as exc:
         return jsonify({"ok": False, "error": f"detect failed: {exc}"}), 500
 
